@@ -1,0 +1,104 @@
+rules_version = '2';
+// Security rules for the SOM Backyard Ultra app.
+// Paste into Firebase console → Firestore Database → Rules → Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // A signed-in Yale person whose email address has been verified by clicking the link.
+    function signedIn() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.lower().matches('.*@yale[.]edu$');
+    }
+    function uid() { return request.auth.uid; }
+    // Someone who has completed sign-up with the event code.
+    function member() { return signedIn() && exists(/databases/$(database)/documents/accounts/$(uid())); }
+    // Organizers: the owner, plus anyone on the list in config/admins.
+    function admin() {
+      return signedIn() && (
+        request.auth.token.email.lower() == 'louka.delautre@yale.edu'
+        || (exists(/databases/$(database)/documents/config/admins)
+            && request.auth.token.email.lower() in get(/databases/$(database)/documents/config/admins).data.emails));
+    }
+    // Event code gate. This is the SHA-256 of the code; change it here AND in index.html (CODE_HASH) to rotate the code.
+    function codeOk(code) {
+      return code is string && hashing.sha256(code).toHexString().lower() == '33726e116ade7e5618ff07bf18cf7691f7e7667445b0ebe8798da24db0c8de4d';
+    }
+    function votingOpen() {
+      return !exists(/databases/$(database)/documents/config/race)
+        || get(/databases/$(database)/documents/config/race).data.get('votingOpen', true) != false;
+    }
+
+    // Written once at sign-up with the event code. Never readable.
+    match /joins/{userId} {
+      allow read: if false;
+      allow create: if signedIn() && userId == uid() && codeOk(request.resource.data.code);
+      allow update, delete: if false;
+    }
+
+    match /accounts/{userId} {
+      allow read: if member() || (signedIn() && userId == uid());
+      allow create: if signedIn() && userId == uid()
+        && exists(/databases/$(database)/documents/joins/$(uid()))
+        && request.resource.data.email == request.auth.token.email.lower()
+        && request.resource.data.role in ['athlete', 'spectator']
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2 && request.resource.data.name.size() <= 80;
+      // Organizers can add runners who cannot register themselves.
+      allow create: if admin() && userId.matches('manual-.*');
+      allow update: if admin()
+        || (member() && userId == uid() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']));
+      allow delete: if admin();
+    }
+
+    match /results/{userId} {
+      allow read: if member();
+      allow write: if admin();
+    }
+
+    match /photos/{userId} {
+      allow read: if member();
+      allow create, update: if member() && userId == uid()
+        && request.resource.data.data is string && request.resource.data.data.size() < 40000;
+      allow delete: if admin() || (member() && userId == uid());
+    }
+
+    match /pledges/{id} {
+      allow read: if member();
+      allow create: if member()
+        && request.resource.data.pledgerKey == uid()
+        && request.resource.data.type in ['per_yard', 'flat']
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0 && request.resource.data.amount <= 100000;
+      allow update: if false;
+      allow delete: if admin() || (member() && resource.data.pledgerKey == uid());
+    }
+
+    match /awards/{award}/entries/{id} {
+      allow read: if member();
+      allow create: if member() && award in ['costume', 'sign'] && votingOpen()
+        && request.resource.data.byKey == uid()
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2 && request.resource.data.name.size() <= 60;
+      allow update: if false;
+      allow delete: if admin();
+    }
+
+    match /awards/{award}/votes/{userId} {
+      allow read: if member();
+      allow create, update: if member() && userId == uid() && award in ['costume', 'sign'] && votingOpen();
+      allow delete: if member() && userId == uid();
+    }
+
+    match /config/race {
+      allow read: if member();
+      allow write: if admin();
+    }
+    match /config/admins {
+      allow read: if member();
+      allow write: if admin() && request.resource.data.emails is list;
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}
