@@ -555,6 +555,7 @@ import { firebaseConfig } from "./firebase-config.js";
     fastest5k: `<svg viewBox="0 0 24 24"><circle cx="12" cy="14" r="7.5"/><path d="M12 14V9.5M10 2h4M12 2v4.5M18.5 8.5l1.5-1.5"/></svg>`,
   };
   const DEFAULT_CFG = { name: "SOM Backyard Ultra", startAt: null, endedAt: null, goal: 5000, donateUrl: "", votingOpen: true, winners: {} };
+  const screens = ["loginForm", "signupForm", "verifyPanel"];
 
   // ---------- state ----------
   const S = { fbUser: null, user: null, db: null, cfg: { ...DEFAULT_CFG }, admins: [], accounts: [], results: {}, photos: {}, pledges: [], entries: { costume: [], sign: [] }, votes: { costume: [], sign: [] }, isAdmin: false, tab: "info", awardSub: null, unsubs: [] };
@@ -591,15 +592,14 @@ import { firebaseConfig } from "./firebase-config.js";
   }
 
   // ---------- firebase ----------
-  if (!firebaseConfig || !firebaseConfig.apiKey) {
-    const b = $("#liError"); b.textContent = "This copy of the app is not connected to a database yet. The organizers need to fill in firebase-config.js.";
-    setAuthMode("login"); setRole("athlete");
-    return;
+  const configured = !!(firebaseConfig && firebaseConfig.apiKey);
+  let app = null, auth = null, db = null;
+  if (configured) {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+    S.db = db;
   }
-  const app = initializeApp(firebaseConfig);
-  const auth = getAuth(app);
-  const db = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
-  S.db = db;
   const col = (p) => collection(db, p);
   const ref = (p) => doc(db, p);
 
@@ -617,7 +617,6 @@ import { firebaseConfig } from "./firebase-config.js";
   function myVote(awardId) { return S.votes[awardId].find(v => v.id === S.user?.key) || null; }
 
   // ---------- auth screens ----------
-  const screens = ["loginForm", "signupForm", "verifyPanel"];
   function showScreen(id) {
     screens.forEach(s => $("#" + s).classList.toggle("hidden", s !== id));
     $("#authMode").classList.toggle("hidden", id === "verifyPanel" || S.finishMode);
@@ -736,7 +735,7 @@ import { firebaseConfig } from "./firebase-config.js";
   $("#logoutBtn").addEventListener("click", () => signOut(auth));
 
   // ---------- auth state ----------
-  onAuthStateChanged(auth, async (u) => {
+  if (configured) onAuthStateChanged(auth, async (u) => {
     S.fbUser = u;
     if (!u) { stopListening(); S.user = null; S.isAdmin = false; S.finishMode = false; setFinishMode(false); setAuthMode("login"); return; }
     if (!validEmail((u.email || "").toLowerCase())) { await signOut(auth); $("#liError").textContent = "Only @" + EMAIL_DOMAIN + " accounts can use this app."; return; }
@@ -1172,6 +1171,7 @@ import { firebaseConfig } from "./firebase-config.js";
 
   // ---------- boot ----------
   setAuthMode("login"); setRole("athlete");
+  if (!configured) $("#liError").textContent = "This copy of the app is not connected to a database yet. The organizers need to fill in firebase-config.js.";
 })();
 </script>
 
