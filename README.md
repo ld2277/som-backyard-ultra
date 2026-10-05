@@ -20,10 +20,10 @@ A static page (GitHub Pages) backed by Firebase Authentication and Cloud Firesto
 3. The app is live at `https://YOUR-USERNAME.github.io/REPO-NAME/` within a minute or two. Share that link.
 
 ## How access works
-- Anyone with the link can open the page, but every action requires a **verified @yale.edu** account, checked by the Firestore rules server-side.
+- Anyone with the link can open the page, but every action requires an account with an **@yale.edu** address created with the event code, checked by the Firestore rules server-side. Addresses are not verified by email, because Yale's mail filter quarantines Firebase's verification messages.
 - Creating an account requires the **event code**. The rules hold only a SHA-256 hash of it. To change the code, compute the new hash (`printf 'NEWCODE' | shasum -a 256` on a Mac) and replace it in both `firestore.rules` (republish) and `index.html` (`CODE_HASH`).
 - **Organizers** are the owner (in `firestore.rules`) plus anyone added from the Profile page. Organizers record yards, set the start time, manage awards and see all accounts.
-- Forgotten passwords are reset by email from the log-in screen.
+- Forgotten passwords: the reset email from the log-in screen may be quarantined by Yale. The reliable fix is Firebase console → Authentication → Users → find the person → delete user (or "Reset password"), then they sign up again.
 
 ## Data
 All data lives in Firestore under the project: `accounts`, `results`, `photos`, `pledges`, `awards/{costume|sign}/entries`, `awards/{costume|sign}/votes`, `config/race`, `config/admins`. Export any time from the Firebase console.

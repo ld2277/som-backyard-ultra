@@ -311,7 +311,7 @@
       </div>
       <p class="error" id="liError"></p>
       <button class="btn accent block" type="submit">Log in</button>
-      <p class="hint"><button type="button" class="linkbtn" id="forgotBtn">Forgot password?</button> Type your email above first; we will send a reset link.</p>
+      <p class="hint"><button type="button" class="linkbtn" id="forgotBtn">Forgot password?</button> Type your email above first and we will send a reset link. If it does not arrive, ask an organizer to reset your account.</p>
       <p class="hint">First time here? <button type="button" class="linkbtn" data-goto="signup">Create an account</button> with the event code from the organizers.</p>
     </form>
 
@@ -721,17 +721,14 @@ import { firebaseConfig } from "./firebase-config.js";
       if (S.finishMode) { await completeSignup(S.fbUser, pending); await afterAuth(S.fbUser); return; }
       try { localStorage.setItem(PENDING_KEY, JSON.stringify(pending)); } catch {}
       const cred = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(cred.user, { displayName: name });
-      await sendEmailVerification(cred.user);
-      // onAuthStateChanged shows the verify panel
+      updateProfile(cred.user, { displayName: name }).catch(() => {});
+      // onAuthStateChanged finishes the sign-up from the saved details
     } catch (ex) { err.textContent = friendly(ex); }
     finally { btn.disabled = false; }
   });
 
   // Writes the account record (and first pledge) once the email is verified. Rules check the code and the verified Yale email.
   async function completeSignup(user, pending) {
-    await user.reload(); await user.getIdToken(true);
-    if (!user.emailVerified) throw new Error("Your email is not verified yet. Open the link we sent to your Yale inbox, then try again.");
     await setDoc(ref("joins/" + user.uid), { code: pending.code, at: serverTimestamp() });
     await setDoc(ref("accounts/" + user.uid), { name: pending.name, email: user.email.toLowerCase(), role: pending.role, bib: pending.role === "athlete" ? pending.bib : null, createdAt: serverTimestamp() });
     if (pending.role === "spectator" && pending.athleteId && pending.amount >= 1) {
@@ -760,7 +757,6 @@ import { firebaseConfig } from "./firebase-config.js";
     S.fbUser = u;
     if (!u) { stopListening(); S.user = null; S.isAdmin = false; S.finishMode = false; setFinishMode(false); setAuthMode("login"); return; }
     if (!validEmail((u.email || "").toLowerCase())) { await signOut(auth); $("#liError").textContent = "Only @" + EMAIL_DOMAIN + " accounts can use this app."; return; }
-    if (!u.emailVerified) { $("#vfEmail").textContent = u.email; showScreen("verifyPanel"); return; }
     await afterAuth(u);
   });
 
@@ -769,7 +765,7 @@ import { firebaseConfig } from "./firebase-config.js";
       const snap = await getDoc(ref("accounts/" + u.uid));
       if (!snap.exists()) {
         let pending = null; try { pending = JSON.parse(localStorage.getItem(PENDING_KEY)); } catch {}
-        if (pending && pending.code) { try { await completeSignup(u, pending); return afterAuth(u); } catch (ex) { console.warn(ex); } }
+        if (pending && pending.code) { try { await completeSignup(u, pending); return afterAuth(u); } catch (ex) { console.warn(ex); $("#suError").textContent = friendly(ex); } }
         setFinishMode(true); setRole("athlete"); showScreen("signupForm"); return;
       }
       const acc = snap.data();
