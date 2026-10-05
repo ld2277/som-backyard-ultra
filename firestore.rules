@@ -60,6 +60,16 @@ service cloud.firestore {
       allow delete: if admin() || (member() && userId == uid());
     }
 
+    // One claim per badge number (1-99). A number that is already claimed cannot be claimed by someone else.
+    match /bibs/{n} {
+      allow read: if false;
+      allow create: if n.matches('^[1-9][0-9]?$') && request.resource.data.keys().hasOnly(['uid'])
+        && (admin() || (signedIn() && request.resource.data.uid == uid()
+            && exists(/databases/$(database)/documents/joins/$(uid()))));
+      allow update: if signedIn() && resource.data.uid == uid() && request.resource.data.uid == uid();
+      allow delete: if admin();
+    }
+
     match /results/{userId} {
       allow read: if member();
       allow write: if admin();

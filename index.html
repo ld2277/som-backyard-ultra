@@ -348,7 +348,8 @@
       </div>
       <div class="field only-athlete">
         <label for="suBib">Badge number</label>
-        <input id="suBib" name="bib" type="number" min="1" inputmode="numeric" placeholder="The number on your race badge">
+        <select id="suBib" name="bib"></select>
+        <p class="hint">Numbers 1 to 99. Numbers already taken cannot be selected.</p>
       </div>
       <div class="field only-spectator">
         <label for="suAthlete">First athlete pledge</label>
@@ -561,7 +562,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail, onAuthStateChanged, signOut, updateProfile, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, onSnapshot, query, where, setDoc, updateDoc, deleteDoc, addDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, onSnapshot, query, where, setDoc, updateDoc, deleteDoc, addDoc, getDoc, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 (() => {
@@ -681,7 +682,19 @@ import { firebaseConfig } from "./firebase-config.js";
     if (on && S.fbUser) { $("#suName").value = S.fbUser.displayName || ""; $("#suEmail").value = S.fbUser.email || ""; }
   }
 
+  // Badge numbers run 1 to 99; taken ones are disabled.
+  function bibOptions(selected, exceptId) {
+    const taken = new Set(S.roster.filter(a => a.id !== exceptId).map(a => Number(a.bib)));
+    let h = `<option value="">Choose your number…</option>`;
+    for (let n = 1; n <= 99; n++) h += `<option value="${n}" ${taken.has(n) ? "disabled" : ""} ${Number(selected) === n && !taken.has(n) ? "selected" : ""}>${n}${taken.has(n) ? " (taken)" : ""}</option>`;
+    return h;
+  }
+  async function claimBib(n, id) {
+    try { await setDoc(ref("bibs/" + n), { uid: id }); }
+    catch (e) { if (e && e.code === "permission-denied") throw new Error("Badge number " + n + " is already taken. Choose another."); throw e; }
+  }
   function renderAthleteSelect() {
+    const bs = $("#suBib"); if (bs) bs.innerHTML = bibOptions(bs.value, S.fbUser?.uid);
     const sel = $("#suAthlete"); if (!sel) return;
     const cur = sel.value, list = [...S.roster].sort((a, b) => String(a.name).localeCompare(String(b.name)));
     sel.innerHTML = list.length ? `<option value="">Choose a runner…</option>` + list.map(a => `<option value="${a.id}">${esc(a.name)}${a.bib ? " · #" + esc(a.bib) : ""}</option>`).join("") : `<option value="">No athletes have registered yet</option>`;
@@ -719,7 +732,7 @@ import { firebaseConfig } from "./firebase-config.js";
     const bib = fd.get("bib") ? Number(fd.get("bib")) : null, athleteId = String(fd.get("athleteId") || ""), amount = Number(fd.get("amount"));
     if (name.length < 2) return err.textContent = "Please enter your name.";
     if (!S.finishMode && !validEmail(email)) return err.textContent = "Use your @" + EMAIL_DOMAIN + " address.";
-    if (role === "athlete" && !(bib >= 1)) return err.textContent = "Enter your badge number.";
+    if (role === "athlete" && !(Number.isInteger(bib) && bib >= 1 && bib <= 99)) return err.textContent = "Choose your badge number.";
     if (role === "athlete" && S.roster.some(a => a.bib === bib && a.id !== S.fbUser?.uid)) return err.textContent = "Badge number " + bib + " is already taken. Check your badge.";
     if (role === "spectator" && S.roster.length) {
       if (!athleteId) return err.textContent = "Choose the first athlete you want to pledge on.";
@@ -746,6 +759,7 @@ import { firebaseConfig } from "./firebase-config.js";
   // Writes the account record (and first pledge) once the email is verified. Rules check the code and the verified Yale email.
   async function completeSignup(user, pending) {
     await setDoc(ref("joins/" + user.uid), { code: pending.code, at: serverTimestamp() });
+    if (pending.role === "athlete") await claimBib(pending.bib, user.uid);
     await setDoc(ref("accounts/" + user.uid), { name: pending.name, email: user.email.toLowerCase(), role: pending.role, bib: pending.role === "athlete" ? pending.bib : null, createdAt: serverTimestamp() });
     if (pending.role === "athlete") await setDoc(ref("roster/" + user.uid), { name: pending.name, bib: pending.bib });
     if (pending.role === "spectator" && pending.athleteId && pending.amount >= 1) {
@@ -791,6 +805,7 @@ import { firebaseConfig } from "./firebase-config.js";
       const acc = snap.data();
       S.user = { key: u.uid, name: acc.name, email: acc.email, role: acc.role, bib: acc.bib || null };
       S.isAdmin = isAdminEmail(acc.email);
+      if (acc.role === "athlete" && acc.bib >= 1 && acc.bib <= 99) setDoc(ref("bibs/" + acc.bib), { uid: u.uid }).catch(() => {});
       if (acc.role === "athlete") setDoc(ref("roster/" + u.uid), { name: acc.name, bib: acc.bib || null }).catch(() => {});
       setFinishMode(false);
       enterApp(); startListening();
@@ -894,11 +909,13 @@ import { firebaseConfig } from "./firebase-config.js";
     $("#raceAdmin").innerHTML = S.isAdmin ? `<div class="admin-box">
         <p class="eyebrow">Organizer tools</p>
         <div class="row" style="flex-wrap:wrap;justify-content:flex-start">
+          <button class="btn sm accent" id="allYardBtn" ${running ? "" : "disabled"}>Everyone completed this yard</button>
           <button class="btn sm" id="addAthBtn">Add a runner manually</button>
           <button class="btn sm ghost" id="startBtn">${S.cfg.startAt ? "Change start time" : "Set race start"}</button>
           ${S.cfg.startAt && !S.cfg.endedAt ? `<button class="btn sm ghost" id="endBtn">Mark race finished</button>` : ""}
           ${S.cfg.endedAt ? `<button class="btn sm ghost" id="reopenBtn">Reopen race</button>` : ""}
         </div>
+        <p class="hint"><b>Each hour:</b> first tap "Mark out" on anyone who did not finish the yard in time, then tap "Everyone completed this yard" to add one yard to all ${running} runner${running === 1 ? "" : "s"} still in.</p>
         <p class="hint">Start: ${S.cfg.startAt ? new Date(S.cfg.startAt).toLocaleString() : "not set"}. Yard number and countdown are computed from this. Athletes join the leaderboard when they create an account.</p>
       </div>` : "";
   }
@@ -913,15 +930,30 @@ import { firebaseConfig } from "./firebase-config.js";
       else if (b.dataset.act === "out") { await setDoc(r, { ...curData, status: "out", updatedAt: serverTimestamp() }); toast(a.name + " marked out"); }
       else if (b.dataset.act === "back") { await setDoc(r, { ...curData, status: "running", updatedAt: serverTimestamp() }); toast(a.name + " back in"); }
       else if (b.dataset.act === "undo") { await setDoc(r, { ...curData, yards: Math.max(0, (cur.yards || 0) - 1), updatedAt: serverTimestamp() }); toast("Removed one yard"); }
-      else if (b.dataset.act === "del") { if (confirm(`Remove ${a.name} from the race? Their account becomes a spectator account; pledges on them stay recorded.`)) { if (a.id.startsWith("manual-")) await deleteDoc(ref("accounts/" + a.id)); else await updateDoc(ref("accounts/" + a.id), { role: "spectator", removedFromRace: serverTimestamp() }); await deleteDoc(r); await deleteDoc(ref("roster/" + a.id)); await deleteDoc(ref("photos/" + a.id)); toast("Runner removed"); } }
+      else if (b.dataset.act === "del") { if (confirm(`Remove ${a.name} from the race? Their account becomes a spectator account; pledges on them stay recorded.`)) { if (a.id.startsWith("manual-")) await deleteDoc(ref("accounts/" + a.id)); else await updateDoc(ref("accounts/" + a.id), { role: "spectator", removedFromRace: serverTimestamp() }); await deleteDoc(r); await deleteDoc(ref("roster/" + a.id)); if (a.bib) await deleteDoc(ref("bibs/" + a.bib)); await deleteDoc(ref("photos/" + a.id)); toast("Runner removed"); } }
     } catch (err) { toast("Could not save: " + friendly(err)); }
   });
   $("#raceAdmin").addEventListener("click", (e) => {
+    if (e.target.id === "allYardBtn") completeYardForAll();
     if (e.target.id === "addAthBtn") openAthleteDialog();
     if (e.target.id === "startBtn") openStartDialog();
     if (e.target.id === "endBtn") saveCfg({ endedAt: nowIso() }, "Race marked finished");
     if (e.target.id === "reopenBtn") saveCfg({ endedAt: null }, "Race reopened");
   });
+
+  async function completeYardForAll() {
+    const list = athletes().filter(a => a.status !== "out");
+    if (!list.length) return;
+    const lo = Math.min(...list.map(a => a.yards)), hi = Math.max(...list.map(a => a.yards));
+    const what = lo === hi ? `yard ${lo + 1}` : `one more yard (runners are currently on ${lo} to ${hi} yards)`;
+    if (!confirm(`Add ${what} for all ${list.length} runner${list.length === 1 ? "" : "s"} still running?\n\nMark out anyone who did not finish first. You can fix a mistake with the −1 button.`)) return;
+    try {
+      const batch = writeBatch(db);
+      for (const a of list) batch.set(ref("results/" + a.id), { yards: (a.yards || 0) + 1, lastSplitSec: a.lastSplitSec || null, status: "running", updatedAt: serverTimestamp() });
+      await batch.commit();
+      toast(`Yard recorded for ${list.length} runner${list.length === 1 ? "" : "s"}`);
+    } catch (err) { toast("Could not save: " + friendly(err)); }
+  }
 
   // ---------- render: fundraiser ----------
   function renderFund() {
@@ -1101,7 +1133,7 @@ import { firebaseConfig } from "./firebase-config.js";
     const da = e.target.closest("button[data-deladmin]");
     if (da) { const em = da.dataset.deladmin; if (confirm(`Remove ${em} as an organizer?`)) { try { await setDoc(ref("config/admins"), { emails: S.admins.filter(x => x !== em) }); toast("Organizer removed"); } catch (err) { toast("Could not save: " + friendly(err)); } } return; }
     const d = e.target.closest("button[data-delacc]");
-    if (d) { const x = accountByKey(d.dataset.delacc); if (x && confirm(`Remove the account for ${x.name}? Their pledges and votes stay recorded.`)) { try { await deleteDoc(ref("accounts/" + x.id)); await deleteDoc(ref("results/" + x.id)); await deleteDoc(ref("photos/" + x.id)); await deleteDoc(ref("roster/" + x.id)); toast("Account removed"); } catch (err) { toast("Could not remove: " + friendly(err)); } } }
+    if (d) { const x = accountByKey(d.dataset.delacc); if (x && confirm(`Remove the account for ${x.name}? Their pledges and votes stay recorded.`)) { try { await deleteDoc(ref("accounts/" + x.id)); await deleteDoc(ref("results/" + x.id)); await deleteDoc(ref("photos/" + x.id)); await deleteDoc(ref("roster/" + x.id)); if (x.role === "athlete" && x.bib) await deleteDoc(ref("bibs/" + x.bib)); toast("Account removed"); } catch (err) { toast("Could not remove: " + friendly(err)); } } }
   });
 
   // Bursts of updates collapse into one paint per frame.
@@ -1162,13 +1194,14 @@ import { firebaseConfig } from "./firebase-config.js";
 
   function openAthleteDialog() {
     openDialog(`<h3>Add a runner manually</h3><p class="muted small">For runners who cannot create an account themselves. They will not be able to log in; they appear on the leaderboard and can be pledged on.</p>
-      <div class="grid2"><div class="field"><label for="aName">Name</label><input id="aName" name="name" required maxlength="60"></div><div class="field"><label for="aBib">Badge number</label><input id="aBib" name="bib" type="number" min="1" required></div></div>
+      <div class="grid2"><div class="field"><label for="aName">Name</label><input id="aName" name="name" required maxlength="60"></div><div class="field"><label for="aBib">Badge number</label><select id="aBib" name="bib" required>${bibOptions("")}</select></div></div>
       ${actions("Add runner")}`, async (fd) => {
       const name = String(fd.get("name")).trim(), bib = Number(fd.get("bib"));
       if (name.length < 2) throw new Error("Enter the runner's name.");
-      if (!(bib >= 1)) throw new Error("Enter a badge number.");
+      if (!(bib >= 1 && bib <= 99)) throw new Error("Choose a badge number.");
       if (athletes().some(a => a.bib === bib)) throw new Error("Badge number " + bib + " is already taken.");
       const mid = "manual-" + Math.random().toString(36).slice(2, 10);
+      await claimBib(bib, mid);
       await setDoc(ref("accounts/" + mid), { name, email: null, role: "athlete", bib, manual: true, addedBy: S.user.email, createdAt: serverTimestamp() });
       await setDoc(ref("roster/" + mid), { name, bib });
       toast(name + " added to the leaderboard");
