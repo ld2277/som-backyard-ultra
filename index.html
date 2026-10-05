@@ -484,7 +484,7 @@
           <li><span class="tm">9:00 am</span><div><b>Check-in and bib pickup</b> <span class="tag">Athletes only</span><p class="muted small">At 90 William St. Corral opens. Drop your bags, receive your goodie bag and bib, get in the zone.</p></div></li>
           <li><span class="tm">9:45 am</span><div><b>Race briefing</b> <span class="tag">Athletes only</span><p class="muted small">Course, cut-offs, corral rules, any questions you might have.</p></div></li>
           <li><span class="tm">10:00 am</span><div><b>Yard 1 starts</b><p class="muted small">Every hour on the hour after this.</p></div></li>
-          <li><span class="tm">12:00 pm</span><div><b>Cookie baking and sign making</b> <span class="tag">Bring your own dough</span><p class="muted small">Bring your cookie dough and bake with us. Make the best sign to win an award and push your favourite athlete to raise more money.</p></div></li>
+          <li><span class="tm">12:00 pm</span><div><b>Cookie baking and sign making</b> <span class="tag">Bring your own dough</span><p class="muted small">At 90 William St. Bring your cookie dough and bake with us. Make the best sign to win an award and push your favourite athlete to raise more money.</p></div></li>
           <li><span class="tm">6:00 pm</span><div><b>Pre-drinks</b> <span class="tag">BYOB</span><p class="muted small">At 252 Willow St. Bring your own drinks and cheer the runners through the Pre Drinks route.</p></div></li>
         </ul>
       </div>
@@ -931,10 +931,35 @@ import { firebaseConfig } from "./firebase-config.js";
         <div class="sub">${t.count} pledge${t.count === 1 ? "" : "s"} · ${money(t.perYard)}/yard</div>
         <button class="btn sm" data-pledge="${a.id}">Pledge</button>
       </div>`; }).join("") : `<div class="banner">Runners appear here as athletes create their accounts.</div>`;
-    $("#fundAdmin").innerHTML = S.isAdmin ? `<div class="admin-box"><p class="eyebrow">Organizer tools</p><div class="row" style="justify-content:flex-start"><button class="btn sm ghost" id="goalBtn">Set goal and collection link</button></div></div>` : "";
+    $("#fundAdmin").innerHTML = S.isAdmin ? `<div class="admin-box"><p class="eyebrow">Organizer tools</p><div class="row" style="justify-content:flex-start"><button class="btn sm" id="reportBtn">Pledge report</button><button class="btn sm ghost" id="goalBtn">Set goal and collection link</button></div><p class="hint">The report lists what each person owes, based on the yards recorded so far. Download it after the race.</p></div>` : "";
   }
   $("#fundAthletes").addEventListener("click", (e) => { const b = e.target.closest("button[data-pledge]"); if (b) openPledgeDialog(athleteById(b.dataset.pledge)); });
-  $("#fundAdmin").addEventListener("click", (e) => { if (e.target.id === "goalBtn") openGoalDialog(); });
+  $("#fundAdmin").addEventListener("click", (e) => { if (e.target.id === "goalBtn") openGoalDialog(); if (e.target.id === "reportBtn") openReportDialog(); });
+
+  // ---------- pledge report (organizers) ----------
+  function pledgeReport() {
+    const lines = S.pledges.map(p => { const a = athleteById(p.athleteId); return { name: p.pledgerName || "", email: p.pledgerEmail || "", athlete: a ? a.name : (p.athleteName || "Runner removed"), type: p.type === "flat" ? "Flat" : "Per loop", amount: Number(p.amount) || 0, yards: a ? a.yards || 0 : 0, owed: pledgeValue(p), note: p.note || "" }; });
+    const by = {};
+    for (const l of lines) { const k = l.email || l.name; (by[k] ||= { name: l.name, email: l.email, pledges: 0, owed: 0 }); by[k].pledges++; by[k].owed += l.owed; }
+    const people = Object.values(by).sort((x, y) => y.owed - x.owed || x.name.localeCompare(y.name));
+    return { lines: lines.sort((x, y) => x.name.localeCompare(y.name) || x.athlete.localeCompare(y.athlete)), people, total: people.reduce((t, x) => t + x.owed, 0) };
+  }
+  function downloadCsv(filename, rows) {
+    const cell = (v) => { let t = String(v ?? ""); if (/^[=+\-@]/.test(t)) t = "'" + t; return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+    const blob = new Blob(["\ufeff" + rows.map(r => r.map(cell).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  function openReportDialog() {
+    const r = pledgeReport(), day = new Date().toISOString().slice(0, 10);
+    dlg.innerHTML = `<form method="dialog"><h3>Pledge report</h3>
+      <p class="muted small">${r.people.length} ${r.people.length === 1 ? "person" : "people"} · ${r.lines.length} pledge${r.lines.length === 1 ? "" : "s"} · <b>${money(r.total)}</b> owed in total, based on yards recorded so far.</p>
+      <div class="list" style="max-height:46vh;overflow:auto">${r.people.map(x => `<div class="item" style="padding:10px 14px"><div style="min-width:0"><b>${esc(x.name)}</b><div class="muted small" style="overflow-wrap:anywhere">${esc(x.email)} · ${x.pledges} pledge${x.pledges === 1 ? "" : "s"}</div></div><b class="mono">${money(x.owed)}</b></div>`).join("") || `<div class="item" style="padding:10px 14px"><span class="muted">No pledges yet.</span></div>`}</div>
+      <div class="row" style="flex-wrap:wrap;justify-content:flex-start"><button type="button" class="btn sm" id="csvPeople">Download: amount owed per person</button><button type="button" class="btn sm ghost" id="csvLines">Download: every pledge</button></div>
+      <div class="dlg-actions"><button class="btn ghost" value="cancel" formnovalidate>Close</button></div></form>`;
+    dlg.querySelector("#csvPeople").addEventListener("click", () => downloadCsv(`backyard-ultra-owed-per-person-${day}.csv`, [["Name", "Email", "Pledges", "Amount owed (USD)"], ...r.people.map(x => [x.name, x.email, x.pledges, x.owed.toFixed(2)]), ["TOTAL", "", r.lines.length, r.total.toFixed(2)]]));
+    dlg.querySelector("#csvLines").addEventListener("click", () => downloadCsv(`backyard-ultra-all-pledges-${day}.csv`, [["Pledger", "Email", "Athlete", "Type", "Pledge amount (USD)", "Yards completed", "Amount owed (USD)", "Message"], ...r.lines.map(l => [l.name, l.email, l.athlete, l.type, l.amount, l.yards, l.owed.toFixed(2), l.note])]));
+    dlg.showModal();
+  }
 
   // ---------- render: awards ----------
   function renderAwards() {
