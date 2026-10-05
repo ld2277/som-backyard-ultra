@@ -358,7 +358,7 @@
       <div class="field only-spectator">
         <label for="suAmount">Pledge per loop amount (USD)</label>
         <input id="suAmount" name="amount" type="number" min="1" step="1" inputmode="decimal" placeholder="5">
-        <p class="hint">Every loop your runner completes adds this amount to their total.</p>
+        <p class="hint">Every loop your runner completes adds this amount to their total. You can withdraw a pledge for one hour after making it.</p>
       </div>
       <div class="field">
         <label for="suCode">Event code</label>
@@ -645,6 +645,10 @@ import { firebaseConfig } from "./firebase-config.js";
   function pledgeValue(p) { if (p.type === "flat") return Number(p.amount) || 0; const a = athleteById(p.athleteId); return (Number(p.amount) || 0) * (a ? (a.yards || 0) : 0); }
   function athleteTotals(id) { const ps = S.pledges.filter(p => p.athleteId === id); return { raised: ps.reduce((s, p) => s + pledgeValue(p), 0), perYard: ps.filter(p => p.type === "per_yard").reduce((s, p) => s + Number(p.amount || 0), 0), count: ps.length }; }
   function voteCounts(awardId) { const m = {}; for (const v of S.votes[awardId]) m[v.entryId] = (m[v.entryId] || 0) + 1; return m; }
+  // A pledge can be withdrawn by its owner for one hour after it was made (also enforced in firestore.rules).
+  const LOCK_MS = 3600000;
+  function pledgeMs(p) { const c = p.createdAt; return c && typeof c.toMillis === "function" ? c.toMillis() : c ? new Date(c).getTime() : Date.now(); }
+  function withdrawLeftMs(p) { return pledgeMs(p) + LOCK_MS - Date.now(); }
   function myVote(awardId) { return S.votes[awardId].find(v => v.id === S.user?.key) || null; }
 
   // ---------- auth screens ----------
@@ -1041,7 +1045,7 @@ import { firebaseConfig } from "./firebase-config.js";
       ${isAth ? `<div class="photo-row"><button class="btn sm ghost" id="photoBtn">${photoOf(S.user.key) ? "Change photo" : "Add a photo"}</button>${photoOf(S.user.key) ? `<button class="btn sm danger" id="photoRm">Remove</button>` : ""}<p class="hint" style="flex-basis:100%">Shown next to your name on the leaderboard and the Fundraiser page.</p></div>` : ""}
       <div class="row" style="justify-content:flex-start"><button class="btn sm ghost" id="pwBtn">Change password</button></div>`;
     const my = S.pledges.filter(p => p.pledgerKey === S.user.key);
-    $("#profPledges").innerHTML = my.length ? my.map(p => { const a = athleteById(p.athleteId); return `<div class="item"><div><b>${esc(a ? a.name : p.athleteName || "Runner removed")}</b><div class="muted small">${p.type === "flat" ? money(p.amount) + " flat" : money(p.amount) + " per loop"} · now ${money(pledgeValue(p))}</div></div><button class="btn xs danger" data-unpledge="${p.id}">Withdraw</button></div>`; }).join("") : `<p class="muted small">You have not pledged yet. Head to the Fundraiser tab.</p>`;
+    $("#profPledges").innerHTML = my.length ? my.map(p => { const a = athleteById(p.athleteId); return `<div class="item"><div><b>${esc(a ? a.name : p.athleteName || "Runner removed")}</b><div class="muted small">${p.type === "flat" ? money(p.amount) + " flat" : money(p.amount) + " per loop"} · now ${money(pledgeValue(p))}</div>${withdrawLeftMs(p) > 0 ? `<div class="hint">Can be withdrawn for ${Math.max(1, Math.ceil(withdrawLeftMs(p) / 60000))} more min</div>` : ""}</div>${withdrawLeftMs(p) > 0 ? `<button class="btn xs danger" data-unpledge="${p.id}">Withdraw</button>` : `<span class="tag">Locked</span>`}</div>`; }).join("") : `<p class="muted small">You have not pledged yet. Head to the Fundraiser tab.</p>`;
     const votes = AWARDS.filter(a => a.kind === "vote").map(a => ({ a, v: myVote(a.id) }));
     $("#profVotes").innerHTML = votes.map(({ a, v }) => `<div class="item"><div><b>${a.title}</b><div class="muted small">${v ? "You voted for " + esc(v.entryName) : "No vote yet"}</div></div><button class="btn xs ghost" data-goaward="${a.id}">${v ? "Change" : "Vote"}</button></div>`).join("");
     if (S.isAdmin) {
@@ -1083,7 +1087,7 @@ import { firebaseConfig } from "./firebase-config.js";
       toast("Photo saved");
     } catch (err) { toast("Could not save photo: " + friendly(err)); }
   }
-  $("#profPledges").addEventListener("click", async (e) => { const b = e.target.closest("button[data-unpledge]"); if (!b) return; if (confirm("Withdraw this pledge?")) { try { await deleteDoc(ref("pledges/" + b.dataset.unpledge)); toast("Pledge withdrawn"); } catch (err) { toast("Could not withdraw: " + friendly(err)); } } });
+  $("#profPledges").addEventListener("click", async (e) => { const b = e.target.closest("button[data-unpledge]"); if (!b) return; const pl = S.pledges.find(x => x.id === b.dataset.unpledge); if (pl && withdrawLeftMs(pl) <= 0) { toast("This pledge is locked. Pledges can be withdrawn for one hour."); renderAll(); return; } if (confirm("Withdraw this pledge?")) { try { await deleteDoc(ref("pledges/" + b.dataset.unpledge)); toast("Pledge withdrawn"); } catch (err) { toast("Could not withdraw: " + friendly(err)); } } });
   $("#profVotes").addEventListener("click", (e) => { const b = e.target.closest("button[data-goaward]"); if (b) { setTab("awards"); openAward(b.dataset.goaward); } });
   $("#profAdmin").addEventListener("click", async (e) => {
     if (e.target.id === "addAdminBtn") return openAdminDialog();
@@ -1119,7 +1123,7 @@ import { firebaseConfig } from "./firebase-config.js";
     if (!a) return;
     openDialog(`<h3>Pledge on ${esc(a.name)}</h3>
       <div class="field"><label>Type</label><div class="seg" id="pType"><button type="button" class="on" data-v="per_yard">Per loop</button><button type="button" data-v="flat">Flat amount</button></div><input type="hidden" name="type" value="per_yard"></div>
-      <div class="field"><label for="pAmt">Amount (USD)</label><input id="pAmt" name="amount" type="number" min="1" step="1" inputmode="decimal" placeholder="5" required><p class="hint" id="pHint">$5 per loop means $5 for every yard ${esc(a.name)} completes. 10 yards would be $50.</p></div>
+      <div class="field"><label for="pAmt">Amount (USD)</label><input id="pAmt" name="amount" type="number" min="1" step="1" inputmode="decimal" placeholder="5" required><p class="hint">You can withdraw a pledge for one hour after making it. After that it is locked.</p><p class="hint" id="pHint">$5 per loop means $5 for every yard ${esc(a.name)} completes. 10 yards would be $50.</p></div>
       <div class="field"><label for="pNote">Message (optional)</label><input id="pNote" name="note" maxlength="140" placeholder="Go get it!"></div>
       ${actions("Pledge")}`, async (fd) => {
       const amount = Number(fd.get("amount")); if (!(amount > 0)) throw new Error("Enter an amount above zero.");

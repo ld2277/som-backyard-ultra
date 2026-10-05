@@ -67,11 +67,14 @@ service cloud.firestore {
       allow read: if member();
       allow create: if member()
         && request.resource.data.pledgerKey == uid()
+        && request.resource.data.createdAt == request.time
         && request.resource.data.type in ['per_yard', 'flat']
         && request.resource.data.amount is number
         && request.resource.data.amount > 0 && request.resource.data.amount <= 100000;
       allow update: if false;
-      allow delete: if admin() || (member() && resource.data.pledgerKey == uid());
+      // The pledger can withdraw for one hour after pledging; after that only organizers can remove it.
+      allow delete: if admin() || (member() && resource.data.pledgerKey == uid()
+        && request.time < resource.data.createdAt + duration.value(1, 'h'));
     }
 
     match /awards/{award}/entries/{id} {
