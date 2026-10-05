@@ -51,6 +51,15 @@ service cloud.firestore {
       allow delete: if admin();
     }
 
+    // Public list of athletes: name and badge number only, so the sign-up form can show who to pledge on.
+    match /roster/{userId} {
+      allow read: if true;
+      allow create, update: if (admin() || (member() && userId == uid()))
+        && request.resource.data.keys().hasOnly(['name', 'bib'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 80;
+      allow delete: if admin() || (member() && userId == uid());
+    }
+
     match /results/{userId} {
       allow read: if member();
       allow write: if admin();
