@@ -167,8 +167,9 @@
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sched .tm { color: var(--sky); } }
   .sched b { font-weight: 600; font-size: 17px; }
   .course { width: 100%; height: auto; display: block; }
-  .loop-seg { width: 100%; display: grid; grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 1px; background: var(--blue); }
-  .loop-seg button { background: var(--bg-2); }
+  .seg.loop-seg { width: 100%; display: grid; grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 1px; background: var(--line); }
+  .seg.loop-seg button { background: var(--bg-2); }
+  .seg.loop-seg button.on { background: var(--blue); }
   .route-when { font-size: 16px; color: var(--ink-2); }
   .loop-seg button { display: grid; gap: 0; padding: 10px 8px; line-height: 1.15; }
   .loop-seg button small { font-size: 12px; font-weight: 600; opacity: .85; }
