@@ -29,7 +29,7 @@ service cloud.firestore {
         || get(/databases/$(database)/documents/config/race).data.get('votingOpen', true) != false;
     }
 
-    // Written once at sign-up with the event code. Never readable.
+    // Written at athlete sign-up with the event code. Never readable. Spectators need no code.
     match /joins/{userId} {
       allow read: if false;
       allow create, update: if signedIn() && userId == uid() && codeOk(request.resource.data.code);
@@ -39,7 +39,7 @@ service cloud.firestore {
     match /accounts/{userId} {
       allow read: if member() || (signedIn() && userId == uid());
       allow create: if signedIn() && userId == uid()
-        && exists(/databases/$(database)/documents/joins/$(uid()))
+        && (request.resource.data.role == 'spectator' || exists(/databases/$(database)/documents/joins/$(uid())))
         && request.resource.data.email == request.auth.token.email.lower()
         && request.resource.data.role in ['athlete', 'spectator']
         && request.resource.data.name is string

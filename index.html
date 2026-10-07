@@ -316,7 +316,7 @@
       <p class="error" id="liError"></p>
       <button class="btn accent block" type="submit">Log in</button>
       <p class="hint"><button type="button" class="linkbtn" id="forgotBtn">Forgot password?</button> Type your email above first and we will send a reset link. If it does not arrive, ask an organizer to reset your account.</p>
-      <p class="hint">First time here? <button type="button" class="linkbtn" data-goto="signup">Create an account</button> with the event code from the organizers.</p>
+      <p class="hint">First time here? <button type="button" class="linkbtn" data-goto="signup">Create an account</button>. Athletes need the event code from the organizers.</p>
     </form>
 
     <div id="verifyPanel" class="auth-form hidden">
@@ -361,9 +361,10 @@
         <input id="suAmount" name="amount" type="number" min="1" step="1" inputmode="decimal" placeholder="5">
         <p class="hint">Every loop your runner completes adds this amount to their total. You can withdraw a pledge for one hour after making it.</p>
       </div>
-      <div class="field">
+      <div class="field only-athlete">
         <label for="suCode">Event code</label>
-        <input id="suCode" name="code" type="password" autocomplete="off" placeholder="Shared by the organizers" required>
+        <input id="suCode" name="code" type="password" autocomplete="off" placeholder="Shared by the organizers">
+        <p class="hint">Athletes only. Spectators do not need a code.</p>
       </div>
       <div class="grid2 only-new">
         <div class="field">
@@ -668,7 +669,7 @@ import { firebaseConfig } from "./firebase-config.js";
     $('#signupForm input[name="role"]').value = role;
     document.querySelectorAll(".only-athlete").forEach(el => el.classList.toggle("hidden", role !== "athlete"));
     document.querySelectorAll(".only-spectator").forEach(el => el.classList.toggle("hidden", role !== "spectator"));
-    $("#roleHint").textContent = role === "athlete" ? "Athletes appear on the leaderboard and can be pledged on." : "Spectators pledge on runners and vote for the awards.";
+    $("#roleHint").textContent = role === "athlete" ? "Athletes appear on the leaderboard and can be pledged on." : "Spectators pledge on runners and vote for the awards. No event code needed.";
   }
   $("#roleSeg").addEventListener("click", (e) => { const b = e.target.closest("button[data-v]"); if (b) setRole(b.dataset.v); });
 
@@ -743,7 +744,7 @@ import { firebaseConfig } from "./firebase-config.js";
     }
     const btn = $("#suSubmit"); btn.disabled = true;
     try {
-      if ((await sha256(code)) !== CODE_HASH) throw new Error("That event code is not right. Ask the organizers.");
+      if (role === "athlete" && (await sha256(code)) !== CODE_HASH) throw new Error("That event code is not right. Ask the organizers.");
       const pending = { role, name, bib: role === "athlete" ? bib : null, athleteId: role === "spectator" ? athleteId : "", amount: role === "spectator" ? amount : 0, code };
       if (S.finishMode) { await completeSignup(S.fbUser, pending); await afterAuth(S.fbUser); return; }
       try { localStorage.setItem(PENDING_KEY, JSON.stringify(pending)); } catch {}
@@ -756,7 +757,7 @@ import { firebaseConfig } from "./firebase-config.js";
 
   // Writes the account record (and first pledge) once the email is verified. Rules check the code and the verified Yale email.
   async function completeSignup(user, pending) {
-    await setDoc(ref("joins/" + user.uid), { code: pending.code, at: serverTimestamp() });
+    if (pending.role === "athlete") await setDoc(ref("joins/" + user.uid), { code: pending.code, at: serverTimestamp() });
     if (pending.role === "athlete") await claimBib(pending.bib, user.uid);
     await setDoc(ref("accounts/" + user.uid), { name: pending.name, email: user.email.toLowerCase(), role: pending.role, bib: pending.role === "athlete" ? pending.bib : null, createdAt: serverTimestamp() });
     if (pending.role === "athlete") await setDoc(ref("roster/" + user.uid), { name: pending.name, bib: pending.bib });
@@ -1095,7 +1096,7 @@ import { firebaseConfig } from "./firebase-config.js";
         <h4 style="font-size:19px;margin-top:8px">Accounts</h4>
         <p class="small"><b>${S.accounts.length}</b> accounts · ${aths} athlete${aths === 1 ? "" : "s"} · ${specs} spectator${specs === 1 ? "" : "s"}</p>
         <div class="list">${[...S.accounts].sort((x, y) => (x.name || "").localeCompare(y.name || "")).map(x => `<div class="item" style="padding:10px 14px"><div><b>${esc(x.name)}</b> <span class="tag">${x.role === "athlete" ? "Athlete" + (x.bib ? " #" + esc(x.bib) : "") : "Spectator"}</span><div class="muted small">${esc(x.email || "no email")}</div></div>${x.id !== S.user.key ? `<button class="btn xs danger" data-delacc="${x.id}">Remove</button>` : ""}</div>`).join("") || `<div class="item" style="padding:10px 14px"><span class="muted">No accounts yet.</span></div>`}</div>
-        <p class="hint">Removing an account clears the person's record; they can set it up again with the event code. Forgotten passwords are reset by email from the log-in screen.</p>`;
+        <p class="hint">Removing an account clears the person's record; they can set it up again. Forgotten passwords are reset by email from the log-in screen.</p>`;
     } else {
       $("#profAdmin").innerHTML = `<p class="muted small">Organizer tools unlock for the emails on the organizer list. If you should be an organizer, ask ${esc(OWNER_EMAIL)} to add you.</p>`;
     }
