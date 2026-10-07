@@ -98,7 +98,7 @@ service cloud.firestore {
 
     match /awards/{award}/entries/{id} {
       allow read: if member();
-      allow create: if member() && award in ['costume', 'sign'] && votingOpen()
+      allow create: if member() && award == 'sign' && votingOpen()
         && request.resource.data.byKey == uid()
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 2 && request.resource.data.name.size() <= 60;
@@ -108,7 +108,7 @@ service cloud.firestore {
 
     match /awards/{award}/votes/{userId} {
       allow read: if member();
-      allow create, update: if member() && userId == uid() && award in ['costume', 'sign'] && votingOpen();
+      allow create, update: if member() && userId == uid() && award == 'sign' && votingOpen();
       allow delete: if member() && userId == uid();
     }
 
