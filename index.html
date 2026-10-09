@@ -602,7 +602,9 @@ import { firebaseConfig } from "./firebase-config.js";
   const validPhoto = (d) => typeof d === "string" && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(d) && d.length < 40000;
   const photoOf = (id) => { const ph = S.photos[id]; return ph && validPhoto(ph.data) ? ph.data : null; };
   const avatar = (a, cls = "") => validPhoto(a.photo) ? `<img class="avatar ${cls}" src="${a.photo}" alt="">` : `<span class="avatar ${cls}" aria-hidden="true">${esc(initials(a.name))}</span>`;
-  const validEmail = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e) && e.endsWith("@" + EMAIL_DOMAIN);
+  // Guests allowed in besides @yale.edu addresses (also listed in firestore.rules).
+  const GUEST_EMAILS = ["ssjorde@gmail.com"];
+  const validEmail = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e) && (e.endsWith("@" + EMAIL_DOMAIN) || GUEST_EMAILS.includes(e.toLowerCase()));
   const nowIso = () => new Date().toISOString();
   let toastTimer;
   const toast = (m) => { const t = $("#toast"); t.textContent = m; t.classList.add("on"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), 2600); };

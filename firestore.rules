@@ -8,7 +8,8 @@ service cloud.firestore {
     // (Yale's mail filter quarantines the verification messages); the event code is the gate.
     function signedIn() {
       return request.auth != null
-        && request.auth.token.email.lower().matches('.*@yale[.]edu$');
+        && (request.auth.token.email.lower().matches('.*@yale[.]edu$')
+            || request.auth.token.email.lower() in ['ssjorde@gmail.com']);
     }
     function uid() { return request.auth.uid; }
     // Someone who has completed sign-up with the event code.
